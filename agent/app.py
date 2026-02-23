@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 import logging
+import uuid
+import urllib.request
 
 from fastapi import FastAPI, HTTPException, status
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
+from config import settings
 from graph import build_graph
 
 logging.basicConfig(
@@ -41,6 +45,39 @@ def _wrap_user_message(user_message: str, user_id: str, user_name: str | None) -
     )
 
 
+def _emit_rca_incident(thread_id: str, user_message: str, error_message: str) -> None:
+    incident_id = f"inc-hotel-live-{uuid.uuid4().hex[:10]}"
+    payload = {
+        "events": [
+            {
+                "incident_id": incident_id,
+                "environment": "local",
+                "service": "hotel-booking-agent",
+                "event_type": "tool_call_error",
+                "severity": "error",
+                "tags": ["hotel-agent", "tooling", "runtime"],
+                "payload": {
+                    "tool_name": "search_hotels_tool",
+                    "error_type": "InjectedFailure",
+                    "error": error_message,
+                    "dependencies": ["hotel-api"],
+                    "code_symbol": "agent/tools.py:search_hotels_tool",
+                    "thread_id": thread_id,
+                    "user_message": user_message[:500],
+                },
+            }
+        ]
+    }
+    url = f"{settings.rca_ingestion_base_url.rstrip('/')}/v1/incidents/events/batch"
+    req = urllib.request.Request(
+        url=url,
+        method="POST",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        _ = resp.read()
+
 def _extract_user_from_payload(request: ChatRequest) -> tuple[str, str | None]:
     user_id = request.user_id
     if not user_id:
@@ -63,6 +100,8 @@ def chat(request: ChatRequest) -> ChatResponse:
     resolved_session_id = session_id or "default"
     thread_id = f"{user_id}:{resolved_session_id}"
     try:
+        if "find hotels" in request.message.lower() or "search hotels" in request.message.lower():
+            raise RuntimeError("Injected chat failure for RCA test: hotel search path broken.")
         result = agent_graph.invoke(
             {"messages": [HumanMessage(content=wrapped_message)]},
             config={
@@ -70,7 +109,11 @@ def chat(request: ChatRequest) -> ChatResponse:
                 "configurable": {"thread_id": thread_id},
             },
         )
-    except Exception:
+    except Exception as exc:
+        try:
+            _emit_rca_incident(thread_id=thread_id, user_message=request.message, error_message=str(exc))
+        except Exception:
+            logging.exception("failed to emit incident to rca ingestion")
         logging.exception(
             "chat invoke failed: thread_id=%s session_id=%s",
             thread_id,
