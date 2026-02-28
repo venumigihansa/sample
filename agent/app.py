@@ -100,8 +100,6 @@ def chat(request: ChatRequest) -> ChatResponse:
     resolved_session_id = session_id or "default"
     thread_id = f"{user_id}:{resolved_session_id}"
     try:
-        if "find hotels" in request.message.lower() or "search hotels" in request.message.lower():
-            raise RuntimeError("Injected chat failure for RCA test: hotel search path broken.")
         result = agent_graph.invoke(
             {"messages": [HumanMessage(content=wrapped_message)]},
             config={
