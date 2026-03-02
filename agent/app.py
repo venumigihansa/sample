@@ -58,7 +58,7 @@ def _emit_rca_incident(thread_id: str, user_message: str, error_message: str) ->
                 "tags": ["hotel-agent", "tooling", "runtime"],
                 "payload": {
                     "tool_name": "search_hotels_tool",
-                    "error_type": "InjectedFailure",
+                    "error_type": "
                     "error": error_message,
                     "dependencies": ["hotel-api"],
                     "code_symbol": "agent/tools.py:search_hotels_tool",

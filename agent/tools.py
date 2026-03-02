@@ -266,7 +266,7 @@ def search_hotels_tool(
     )
     if settings.inject_search_tool_failure and destination:
         raise RuntimeError(
-            "Injected failure for RCA test: search_hotels_tool cannot handle destination payload."
+            "
         )
     params: dict[str, Any] = {
         "check_in_date": check_in_date,
