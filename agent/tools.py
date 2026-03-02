@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Optional
+import time
 import requests
 from datetime import date, datetime, timedelta, timezone
 from langchain_pinecone import PineconeVectorStore
@@ -111,11 +112,25 @@ def _call_hotel_api(
     json_body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     url = _booking_api_url(path)
-    try:
-        response = requests.request(method, url, params=params, json=json_body, timeout=30)
-        response.raise_for_status()
-    except requests.RequestException:
-        logger.exception("Hotel API request failed: %s %s", method, url)
+    last_exc: requests.RequestException | None = None
+    for attempt in range(1, 4):
+        try:
+            response = requests.request(method, url, params=params, json=json_body, timeout=45)
+            response.raise_for_status()
+            break
+        except requests.Timeout as exc:
+            last_exc = exc
+            logger.warning("Hotel API timeout (%s/%s): %s %s", attempt, 3, method, url)
+            if attempt < 3:
+                time.sleep(0.4 * (2 ** (attempt - 1)))
+                continue
+            logger.exception("Hotel API request timed out after retries: %s %s", method, url)
+            return {"error": "Hotel API request timed out after retries."}
+        except requests.RequestException as exc:
+            last_exc = exc
+            logger.exception("Hotel API request failed: %s %s", method, url)
+            return {"error": "Hotel API request failed."}
+    if last_exc and 'response' not in locals():
         return {"error": "Hotel API request failed."}
     try:
         payload = response.json()
